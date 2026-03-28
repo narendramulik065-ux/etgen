@@ -1,0 +1,16 @@
+{
+    "household_summary": {
+        "total_net_worth": "₹28.4L",
+        "monthly_savings": "₹92,400",
+        "health_score": "5.8/10"
+    },
+    "tax_optimization": {
+        "potential_savings": "₹46,800",
+        "primary_action": "Switch HRA claim from Partner A to Partner B"
+    },
+    "portfolio_analysis": {
+        "total_aum": "₹16.2L",
+        "leakage_detected": "₹2.8L",
+        "overlap_percentage": "45%"
+    }
+}
