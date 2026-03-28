@@ -1,8 +1,10 @@
 fastapi
 uvicorn
+python-multipart
+groq
 llama-parse
-openai
-python-dotenv
-pydantic
-pdfplumber
 google-generativeai
+supabase
+python-dotenv
+numpy-financial
+langgraph
