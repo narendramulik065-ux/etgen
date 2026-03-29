@@ -18,6 +18,9 @@ export default function Dashboard() {
   const [coupleData, setCoupleData] = useState<any>(null);
   const [portfolioData, setPortfolioData] = useState<any>(null);
 
+  // 🏁 THE FIX: Integrated your live Railway URL directly as the primary endpoint.
+  const API_BASE_URL = "https://etgen-production.up.railway.app";
+
   useEffect(() => {
     setIsClient(true);
   }, []);
@@ -29,10 +32,11 @@ export default function Dashboard() {
     setError(null);
 
     const formData = new FormData();
+    // Correctly sends the file using the 'files' key for the backend
     files.forEach(f => formData.append("files", f));
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/optimize", {
+      const response = await fetch(`${API_BASE_URL}/api/optimize`, {
         method: "POST",
         body: formData,
       });
@@ -49,19 +53,18 @@ export default function Dashboard() {
   const handleTabSwitch = async (tab: string) => {
     setActiveTab(tab);
     if (tab === 'couple' && !coupleData) {
-      const res = await fetch("http://127.0.0.1:8000/api/couple/analyze", { method: "POST" });
+      const res = await fetch(`${API_BASE_URL}/api/couple/analyze`, { method: "POST" });
       setCoupleData(await res.json());
     } else if (tab === 'portfolio' && !portfolioData) {
-      const res = await fetch("http://127.0.0.1:8000/api/portfolio/analyze", { method: "POST" });
+      const res = await fetch(`${API_BASE_URL}/api/portfolio/analyze`, { method: "POST" });
       setPortfolioData(await res.json());
     }
   };
 
-  if (!isClient) return null; // Prevent hydration mismatch by waiting for client side
+  if (!isClient) return null;
 
   return (
     <div className="min-h-screen bg-[#F0F2F5] text-gray-900 font-sans p-4 md:p-8">
-      {/* Dashboard Container */}
       <div className="max-w-5xl mx-auto space-y-6">
         
         {/* Header Bar */}
@@ -105,7 +108,6 @@ export default function Dashboard() {
 
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
-            {/* Top 3-Metric Bar */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 grid grid-cols-3 divide-x divide-gray-100">
               <div className="p-6">
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none mb-2">NET WORTH</p>
@@ -127,7 +129,6 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Upload Card Area */}
             <div className="bg-white p-12 rounded-xl shadow-sm border border-gray-100 text-center relative">
               <h2 className="text-3xl font-serif font-black tracking-tighter text-gray-900 mb-2">Upload Your Form 16</h2>
               <p className="text-gray-400 text-sm italic mb-8">Get instant AI tax optimization strategies for your household.</p>
@@ -148,21 +149,19 @@ export default function Dashboard() {
                  </button>
               </div>
 
-              {/* Large Savings Overlay (Appears after analysis) */}
               {analysis && (
                 <div className="mt-12 bg-[#F6FFF6] border border-[#E0F0E0] p-10 rounded-3xl animate-in zoom-in duration-500">
-                   <p className="text-[10px] font-bold text-[#10B981] uppercase tracking-[0.2em] mb-3">CALCULATED POTENTIAL SAVINGS</p>
-                   <h3 className="text-7xl font-serif font-black text-[#10B981] tracking-tighter">
-                     {analysis?.tax_optimization?.potential_savings}
-                   </h3>
-                   <p className="text-lg font-serif italic text-gray-700 mt-6 tracking-tight">
-                     " {analysis?.tax_optimization?.primary_action} "
-                   </p>
+                    <p className="text-[10px] font-bold text-[#10B981] uppercase tracking-[0.2em] mb-3">CALCULATED POTENTIAL SAVINGS</p>
+                    <h3 className="text-7xl font-serif font-black text-[#10B981] tracking-tighter">
+                      {analysis?.tax_optimization?.potential_savings}
+                    </h3>
+                    <p className="text-lg font-serif italic text-gray-700 mt-6 tracking-tight">
+                      " {analysis?.tax_optimization?.primary_action} "
+                    </p>
                 </div>
               )}
             </div>
 
-            {/* Bottom Charts Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-auto md:h-[350px]">
                <WealthProjectionChart 
                  chartData={analysis?.tax_optimization?.chart_data} 
@@ -171,7 +170,6 @@ export default function Dashboard() {
                <HouseholdAlignment score={analysis?.household_summary?.household_alignment || 76} />
             </div>
 
-            {/* Mentor Section */}
             <div className="pt-12 flex flex-col items-center">
                 <h3 className="font-serif font-bold text-xl text-gray-900 flex items-center gap-2 mb-8">
                     <span className="text-[#ED1C24]">●</span> Consult Your Sentinel Mentor
@@ -195,13 +193,6 @@ export default function Dashboard() {
           <PremiumPageUI />
         )}
 
-        <div className="flex justify-center gap-4 py-8 opacity-20 cursor-not-allowed">
-            <div className="w-10 h-10 bg-black rounded-lg"></div>
-            <div className="w-10 h-10 bg-black rounded-lg"></div>
-            <div className="w-10 h-10 bg-black rounded-lg"></div>
-        </div>
-
-        {/* Disclaimer */}
         <footer className="pb-12 text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-relaxed max-w-md mx-auto">
             Calculations based on standard Indian Tax slabs and 12% institutional growth projections.
         </footer>
