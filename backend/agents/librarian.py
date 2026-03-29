@@ -61,7 +61,7 @@ def get_tax_data(file_path: str) -> dict:
             response_format={"type": "json_object"}
         )
 
-        # ✅ SAFE JSON PARSE (prevents crash)
+        # SAFE JSON PARSE
         content = chat_completion.choices[0].message.content
 
         try:
@@ -75,30 +75,36 @@ def get_tax_data(file_path: str) -> dict:
                 "pan": "PARSE_ERROR"
             }
 
-        # 🔥 NORMALIZATION (SAME LOGIC)
+        print("🔍 RAW STRUCTURE:", raw)
+
+        # 🔥 FIXED SALARY EXTRACTION
         salary = (
             raw.get("salary")
             or raw.get("Gross Salary")
+            or raw.get("Gross_Salary")
             or raw.get("Total 17(1)")
             or raw.get("Total Salary")
             or 0.0
         )
 
+        # 🔥 FIXED TAX EXTRACTION
         tax_paid = (
             raw.get("tax_paid")
             or raw.get("Net tax payable")
+            or raw.get("Net_Tax_Payable")
             or raw.get("Total tax deducted")
             or raw.get("Tax")
             or 0.0
         )
 
+        # 🔥 FIXED 80C EXTRACTION
         deductions_80c = (
             raw.get("deductions_80c")
             or raw.get("Section 80C")
+            or raw.get("Section_80C_Deduction")
             or raw.get("80C")
             or raw.get("Total deduction under section 80C")
             or raw.get("Total deduction under section 80C, 80CCC and 80CCD(1)")
-            or raw.get("Deduction in respect of life insurance premia")
             or 0.0
         )
 
