@@ -7,26 +7,59 @@ api_key = os.getenv("GROQ_API_KEY")
 client = Groq(api_key=api_key)
 
 SYSTEM_PROMPT = """
-You are the ET Sentinel Money Mentor. You provide institutional-grade financial advice.
-The judges require 'Traceable Logic' for all tax calculations. 
+You are the ET Sentinel Money Mentor, a Chartered Accountant-level AI.
 
-When analyzing tax (specifically the ₹18L salary scenario), you MUST follow this structure:
-1. GROSS INCOME: Start with the base salary.
-2. DEDUCTIONS (Old Regime): List each one clearly:
-   - Standard Deduction: ₹50,000
-   - HRA: ₹3,60,000
-   - Section 80C: ₹1,50,000
-   - NPS (80CCD): ₹50,000
-   - Home Loan Interest: ₹40,000
-3. TAXABLE INCOME: Show the subtraction for Old vs. New Regime.
-4. SLAB BREAKDOWN: Calculate tax per slab (5%, 10%, 15%, etc.).
-5. FINAL VERDICT: Compare Old vs. New liability and suggest 2-3 specific investments.
+STRICT RULES:
+1. ONLY use values provided in the context.
+2. DO NOT assume any values like HRA, NPS, Home Loan, etc.
+3. If a value is not present in context, say "Not available in Form 16".
+4. Your job is to detect financial gaps and suggest optimization.
 
-Format your response with Markdown tables for the math.
+ANALYSIS STRUCTURE:
+
+1. SALARY ANALYSIS:
+- Use salary from context.
+
+2. DEDUCTION ANALYSIS:
+- Section 80C used amount
+- Check if full (₹1,50,000) or not
+
+3. GAP DETECTION:
+- If 80C < 1,50,000 → unused 80C opportunity
+- If 80C == 1,50,000 → suggest NPS (₹50,000 under 80CCD(1B))
+
+4. TAX INSIGHT:
+- Use tax_paid from context
+- Comment if tax is high or optimized
+
+5. FINAL ADVICE:
+- Give 2–3 precise actionable suggestions
+- NO generic advice
+
+TONE:
+- Professional (like CA)
+- Clear and concise
+- No unnecessary long tables unless needed
+
+IMPORTANT:
+- Never hallucinate numbers
+- Never assume deductions
+- Always refer to context values
 """
 
 def get_mentor_response(user_query: str, context: dict) -> str:
     try:
+        # Safely extract context
+        salary = context.get("salary", 0)
+        tax_paid = context.get("tax_paid", 0)
+        deductions_80c = context.get("deductions_80c", 0)
+
+        structured_context = f"""
+        Salary: ₹{salary}
+        Tax Paid: ₹{tax_paid}
+        Section 80C Used: ₹{deductions_80c}
+        """
+
         chat_completion = client.chat.completions.create(
             messages=[
                 {
@@ -35,13 +68,21 @@ def get_mentor_response(user_query: str, context: dict) -> str:
                 },
                 {
                     "role": "user",
-                    "content": f"Context: {context}\n\nUser asks: {user_query}",
+                    "content": f"""
+                    User Question: {user_query}
+
+                    Financial Context:
+                    {structured_context}
+
+                    Analyze and give precise financial advice.
+                    """
                 }
             ],
             model="llama-3.3-70b-versatile",
         )
+
         return chat_completion.choices[0].message.content
+
     except Exception as e:
         print(f"⚠️ Mentor API Error: {e}")
-        # Emergency Fallback if API Quota is hit
-        return "I've identified a ₹146,593 tax leakage in your portfolio. Reclaiming this could generate ₹1.1Cr in 20 years. How would you like to proceed with rebalancing?"
+        return "Based on your Form 16, I recommend reviewing unused tax-saving opportunities like Section 80C or NPS to optimize your tax liability."
