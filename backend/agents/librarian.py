@@ -77,7 +77,7 @@ def get_tax_data(file_path: str) -> dict:
 
         print("🔍 RAW STRUCTURE:", raw)
 
-        # 🔥 FIXED SALARY EXTRACTION
+        # ✅ FIXED SALARY EXTRACTION
         salary = (
             raw.get("salary")
             or raw.get("Gross Salary")
@@ -87,7 +87,7 @@ def get_tax_data(file_path: str) -> dict:
             or 0.0
         )
 
-        # 🔥 FIXED TAX EXTRACTION
+        # ✅ FIXED TAX EXTRACTION
         tax_paid = (
             raw.get("tax_paid")
             or raw.get("Net tax payable")
@@ -97,7 +97,7 @@ def get_tax_data(file_path: str) -> dict:
             or 0.0
         )
 
-        # 🔥 FIXED 80C EXTRACTION
+        # ✅ FIXED 80C EXTRACTION
         deductions_80c = (
             raw.get("deductions_80c")
             or raw.get("Section 80C")
