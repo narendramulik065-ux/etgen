@@ -15,6 +15,9 @@ export default function MentorChat({ financialContext }: { financialContext: any
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // 🏁 THE FIX: Points to your live Railway server instead of your laptop
+  const API_BASE_URL = "https://etgen-production.up.railway.app";
+
   // Auto-scroll to latest message
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -30,14 +33,14 @@ export default function MentorChat({ financialContext }: { financialContext: any
 
     try {
       // Create the context object for the mentor
-      // We extract the base numbers from the analysis object
       const mentorContext = {
         salary: financialContext?.salary || 0,
         tax_paid: financialContext?.tax_paid || 0,
         savings: financialContext?.tax_leakage || 0
       };
 
-      const response = await fetch('http://127.0.0.1:8000/api/chat', {
+      // Updated to use the live API URL
+      const response = await fetch(`${API_BASE_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -45,6 +48,7 @@ export default function MentorChat({ financialContext }: { financialContext: any
           context: mentorContext
         }),
       });
+      
       const data = await response.json();
       setMessages(prev => [...prev, { role: 'ai', content: data.reply }]);
     } catch (error) {
