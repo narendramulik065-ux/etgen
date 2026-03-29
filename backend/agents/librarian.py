@@ -46,7 +46,7 @@ def get_tax_data(file_path: str) -> dict:
                 },
                 {"role": "user", "content": f"Full Document Text:\n{full_text}"}
             ],
-            model="model="llama-3.1-8b-instant"", 
+            model="llama-3.3-70b-versatile"
             temperature=0,
             response_format={"type": "json_object"}
         )
