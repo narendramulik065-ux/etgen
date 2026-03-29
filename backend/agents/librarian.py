@@ -61,27 +61,31 @@ def get_tax_data(file_path: str) -> dict:
 
         print("🔍 RAW STRUCTURE:", raw)
 
-        # 🔥 NORMALIZATION
+        # 🔥 SALARY EXTRACTION (FIXED)
         salary = (
             raw.get("salary")
             or raw.get("Gross Salary")
+            or raw.get("Gross_Salary")
             or raw.get("Total 17(1)")
             or raw.get("Total Salary")
             or 0.0
         )
 
+        # 🔥 TAX EXTRACTION (FIXED)
         tax_paid = (
             raw.get("tax_paid")
             or raw.get("Net tax payable")
+            or raw.get("Net_Tax_Payable")
             or raw.get("Total tax deducted")
             or raw.get("Tax")
             or 0.0
         )
 
-        # 🔥 FINAL ROBUST 80C EXTRACTION (FIXED)
+        # 🔥 80C EXTRACTION (FINAL ROBUST VERSION)
         deductions_80c = (
             raw.get("deductions_80c")
             or raw.get("Section 80C")
+            or raw.get("Section_80C_Deduction")
             or raw.get("80C")
             or raw.get("Total deduction under section 80C")
             or raw.get("Total deduction under section 80C, 80CCC and 80CCD(1)")
