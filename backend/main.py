@@ -23,43 +23,73 @@ async def optimize(files: UploadFile = File(...)):
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(files.file, buffer)
         
-    # 1. Get Synchronized Data [cite: 522, 680]
+    # 1. Get Synchronized Data
     data = get_tax_data(temp_path)
     salary = float(data.get("salary", 0))
     tax = float(data.get("tax_paid", 0))
     deductions = float(data.get("deductions_80c", 0))
 
     if salary <= 0:
-        return {"household_summary": {"total_net_worth": "₹0L", "health_score": "0/10"}, "tax_optimization": {"potential_savings": "₹0"}}
+        return {
+            "household_summary": {
+                "total_net_worth": "₹0L",
+                "health_score": "0/10"
+            },
+            "tax_optimization": {
+                "potential_savings": "₹0"
+            }
+        }
 
-    # 2. Institutional Calculations [cite: 175, 419, 678]
-    h_score = round((min(deductions, 150000) / 150000) * 10, 1)
-    
-    # NEW: DYNAMIC HOUSEHOLD ALIGNMENT logic 
-    # Penalizes the synergy score if tax leakage is high relative to income
+    # 2. Institutional Calculations
+
+    # --- FIX 1: REAL TAX OPTIMIZATION ---
+    unused_80c = max(150000 - deductions, 0)
+
+    if salary <= 500000:
+        tax_rate = 0.0
+    elif salary <= 1000000:
+        tax_rate = 0.2
+    else:
+        tax_rate = 0.3
+
+    potential_savings = int(unused_80c * tax_rate * 1.04)
+
+    # --- FIX 2: REGIME-AWARE HEALTH SCORE ---
+    is_new_regime = deductions == 0 and salary > 0
+
+    if is_new_regime:
+        if potential_savings == 0:
+            h_score = 10.0
+        else:
+            h_score = 7.5
+    else:
+        h_score = round((min(deductions, 150000) / 150000) * 10, 1)
+
+    # --- FIX 3: ALIGNMENT LOGIC ---
     leakage_ratio = tax / salary if salary > 0 else 0
-    dynamic_alignment = int(100 - (min(leakage_ratio * 200, 40))) 
-    
-    # Wealth Trajectory Array: 12% CAGR Growth of tax leakage [cite: 719]
-    chart_data = [int(tax * (1.12 ** y)) for y in [0, 5, 10, 15, 20]]
-    
-    # Standardize the Ultimate Gain string for reuse [cite: 722]
-    ultimate_gain = f"₹{chart_data[-1] / 10000000:.1f}Cr" if chart_data[-1] > 10000000 else f"₹{chart_data[-1] / 100000:.1f}L"
-    
+    dynamic_alignment = int(100 - (min(leakage_ratio * 200, 40)))
+
+    # --- FIX 4: CORRECT WEALTH PROJECTION ---
+    chart_data = [int(potential_savings * (1.12 ** y)) for y in [0, 5, 10, 15, 20]]
+
+    ultimate_gain = (
+        f"₹{chart_data[-1] / 10000000:.1f}Cr"
+        if chart_data[-1] > 10000000
+        else f"₹{chart_data[-1] / 100000:.1f}L"
+    )
+
     return {
         "household_summary": {
-            "total_net_worth": f"₹{salary * 1.85 / 100000:.1f}L", 
+            "total_net_worth": f"₹{salary * 1.85 / 100000:.1f}L",
             "monthly_savings": f"₹{int((salary/12)*0.28):,}",
             "health_score": f"{h_score}/10",
-            # FEATURE 1: HOUSEHOLD ALIGNMENT IS NOW DYNAMIC [cite: 720, 729]
-            "household_alignment": dynamic_alignment 
+            "household_alignment": dynamic_alignment
         },
         "tax_optimization": {
-            "potential_savings": f"₹{int(tax):,}",
+            "potential_savings": f"₹{potential_savings:,}",
             "ultimate_gain": ultimate_gain,
             "chart_data": chart_data,
-            # FEATURE 2: REMOVED "" EMPTY GAP [cite: 717, 718]
-            "primary_action": f"Redirect ₹{int(tax):,} leakage into {ultimate_gain} lifetime wealth."
+            "primary_action": f"Redirect ₹{potential_savings:,} unused deduction into {ultimate_gain} lifetime wealth."
         },
         "raw_context": data
     }
