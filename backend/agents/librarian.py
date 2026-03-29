@@ -22,36 +22,72 @@ def get_tax_data(file_path: str) -> dict:
         
         full_text = ""
         with pdfplumber.open(file_path) as pdf:
-            # FIX: Scans every page to find Annexures regardless of page number 
             for page in pdf.pages:
                 text = page.extract_text()
                 if text:
                     full_text += text + " \n "
 
-        # 🎯 UNIVERSAL PROMPT: No specific names or numbers to avoid hallucination 
         chat_completion = client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "You are a professional Indian Tax Auditor. Extract data from this Form 16. "
+                        "You are a professional Indian Tax Auditor. Extract data from this Form 16.\n"
                         "RULES:\n"
-                        "1. 'salary': Find 'Gross Salary' or 'Total 17(1)'. Do NOT assume or guess the range.\n"
-                        "2. 'tax_paid': Find 'Net tax payable' or 'Total tax deducted'. If zero, return 0.0.\n"
-                        "3. 'deductions_80c': Find Section 80C. If New Regime (115BAC), return 0.0.\n"
-                        "4. 'pan': Extract the 10-character alphanumeric PAN.\n"
-                        "Return ONLY valid JSON: {'salary': float, 'tax_paid': float, 'deductions_80c': float, 'pan': 'string'}"
+                        "1. Find Gross Salary or Total salary u/s 17(1)\n"
+                        "2. Find Net tax payable OR Total tax deducted\n"
+                        "3. Find Section 80C deduction (final deductible amount)\n"
+                        "4. Extract PAN\n"
+                        "IMPORTANT:\n"
+                        "- Different formats exist, search entire document\n"
+                        "- Do NOT miss values if present\n"
+                        "Return JSON"
                     )
                 },
-                {"role": "user", "content": f"Full Document Text:\n{full_text[:20000]}"}
+                {"role": "user", "content": f"Full Document Text:\n{full_text}"}
             ],
             model="llama-3.1-8b-instant", 
             temperature=0,
             response_format={"type": "json_object"}
         )
-        
-        extracted = json.loads(chat_completion.choices[0].message.content)
-        print(f"✅ Universal Extraction Success: {extracted}")
+
+        raw = json.loads(chat_completion.choices[0].message.content)
+
+        # 🔥 NORMALIZATION (CRITICAL FIX)
+        salary = (
+            raw.get("salary")
+            or raw.get("Gross Salary")
+            or raw.get("Total 17(1)")
+            or raw.get("Total Salary")
+            or 0.0
+        )
+
+        tax_paid = (
+            raw.get("tax_paid")
+            or raw.get("Net tax payable")
+            or raw.get("Total tax deducted")
+            or raw.get("Tax")
+            or 0.0
+        )
+
+        deductions_80c = (
+            raw.get("deductions_80c")
+            or raw.get("Section 80C")
+            or raw.get("80C")
+            or raw.get("Total deduction under section 80C")
+            or 0.0
+        )
+
+        pan = raw.get("pan") or raw.get("PAN") or "UNKNOWN"
+
+        extracted = {
+            "salary": float(salary),
+            "tax_paid": float(tax_paid),
+            "deductions_80c": float(deductions_80c),
+            "pan": pan
+        }
+
+        print(f"✅ Normalized Extraction: {extracted}")
         return extracted
 
     except Exception as e:
