@@ -51,7 +51,7 @@ def get_tax_data(file_path: str) -> dict:
             response_format={"type": "json_object"}
         )
 
-        # ✅ SAFE JSON PARSE (prevents crash)
+        # ✅ SAFE JSON PARSE
         content = chat_completion.choices[0].message.content
         try:
             raw = json.loads(content)
@@ -59,7 +59,9 @@ def get_tax_data(file_path: str) -> dict:
             print("⚠️ JSON parse failed:", content)
             return {"salary": 0.0, "tax_paid": 0.0, "deductions_80c": 0.0, "pan": "PARSE_ERROR"}
 
-        # 🔥 NORMALIZATION (FIXED)
+        print("🔍 RAW STRUCTURE:", raw)
+
+        # 🔥 NORMALIZATION
         salary = (
             raw.get("salary")
             or raw.get("Gross Salary")
@@ -76,15 +78,42 @@ def get_tax_data(file_path: str) -> dict:
             or 0.0
         )
 
+        # 🔥 FINAL ROBUST 80C EXTRACTION (FIXED)
         deductions_80c = (
             raw.get("deductions_80c")
             or raw.get("Section 80C")
             or raw.get("80C")
             or raw.get("Total deduction under section 80C")
             or raw.get("Total deduction under section 80C, 80CCC and 80CCD(1)")
-            or raw.get("Deduction in respect of life insurance premia")
-            or 0.0
         )
+
+        # 👉 HANDLE NESTED STRUCTURE
+        def find_80c_value(data):
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    if "80C" in str(k):
+                        if isinstance(v, dict):
+                            return (
+                                v.get("Deductible Amount")
+                                or v.get("Gross Amount")
+                                or 0.0
+                            )
+                        elif isinstance(v, (int, float)):
+                            return v
+                    else:
+                        result = find_80c_value(v)
+                        if result:
+                            return result
+            return None
+
+        if not deductions_80c:
+            deep_value = find_80c_value(raw)
+            if deep_value:
+                deductions_80c = deep_value
+
+        # 👉 FINAL SAFETY
+        if not deductions_80c:
+            deductions_80c = 0.0
 
         pan = raw.get("pan") or raw.get("PAN") or "UNKNOWN"
 
