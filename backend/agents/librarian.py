@@ -9,17 +9,24 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(dotenv_path=BASE_DIR / ".env")
 
+
 def get_tax_data(file_path: str) -> dict:
     api_key = os.getenv("GROQ_API_KEY")
+
     if not api_key:
         print("⚠️ ERROR: GROQ_API_KEY not found.")
-        return {"salary": 0.0, "tax_paid": 0.0, "deductions_80c": 0.0, "pan": "NO_KEY"}
+        return {
+            "salary": 0.0,
+            "tax_paid": 0.0,
+            "deductions_80c": 0.0,
+            "pan": "NO_KEY"
+        }
 
     client = Groq(api_key=api_key)
 
     try:
         print(f"📂 Librarian: Deep-scanning {file_path} for universal data...")
-        
+
         full_text = ""
         with pdfplumber.open(file_path) as pdf:
             for page in pdf.pages:
@@ -44,80 +51,56 @@ def get_tax_data(file_path: str) -> dict:
                         "Return JSON"
                     )
                 },
-                {"role": "user", "content": f"Full Document Text:\n{full_text}"}
+                {
+                    "role": "user",
+                    "content": f"Full Document Text:\n{full_text}"
+                }
             ],
             model="llama-3.3-70b-versatile",
             temperature=0,
             response_format={"type": "json_object"}
         )
 
-        # ✅ SAFE JSON PARSE
+        # ✅ SAFE JSON PARSE (prevents crash)
         content = chat_completion.choices[0].message.content
+
         try:
             raw = json.loads(content)
         except:
             print("⚠️ JSON parse failed:", content)
-            return {"salary": 0.0, "tax_paid": 0.0, "deductions_80c": 0.0, "pan": "PARSE_ERROR"}
+            return {
+                "salary": 0.0,
+                "tax_paid": 0.0,
+                "deductions_80c": 0.0,
+                "pan": "PARSE_ERROR"
+            }
 
-        print("🔍 RAW STRUCTURE:", raw)
-
-        # 🔥 SALARY EXTRACTION (FIXED)
+        # 🔥 NORMALIZATION (SAME LOGIC)
         salary = (
             raw.get("salary")
             or raw.get("Gross Salary")
-            or raw.get("Gross_Salary")
             or raw.get("Total 17(1)")
             or raw.get("Total Salary")
             or 0.0
         )
 
-        # 🔥 TAX EXTRACTION (FIXED)
         tax_paid = (
             raw.get("tax_paid")
             or raw.get("Net tax payable")
-            or raw.get("Net_Tax_Payable")
             or raw.get("Total tax deducted")
             or raw.get("Tax")
             or 0.0
         )
 
-        # 🔥 80C EXTRACTION (FINAL ROBUST VERSION)
         deductions_80c = (
             raw.get("deductions_80c")
             or raw.get("Section 80C")
-            or raw.get("Section_80C_Deduction")
             or raw.get("80C")
             or raw.get("Total deduction under section 80C")
             or raw.get("Total deduction under section 80C, 80CCC and 80CCD(1)")
+            or raw.get("Deduction in respect of life insurance premia")
+            or 0.0
         )
-
-        # 👉 HANDLE NESTED STRUCTURE
-        def find_80c_value(data):
-            if isinstance(data, dict):
-                for k, v in data.items():
-                    if "80C" in str(k):
-                        if isinstance(v, dict):
-                            return (
-                                v.get("Deductible Amount")
-                                or v.get("Gross Amount")
-                                or 0.0
-                            )
-                        elif isinstance(v, (int, float)):
-                            return v
-                    else:
-                        result = find_80c_value(v)
-                        if result:
-                            return result
-            return None
-
-        if not deductions_80c:
-            deep_value = find_80c_value(raw)
-            if deep_value:
-                deductions_80c = deep_value
-
-        # 👉 FINAL SAFETY
-        if not deductions_80c:
-            deductions_80c = 0.0
 
         pan = raw.get("pan") or raw.get("PAN") or "UNKNOWN"
 
@@ -133,4 +116,9 @@ def get_tax_data(file_path: str) -> dict:
 
     except Exception as e:
         print(f"⚠️ Groq Error: {e}. Returning fallback.")
-        return {"salary": 0.0, "tax_paid": 0.0, "deductions_80c": 0.0, "pan": "ERROR"}
+        return {
+            "salary": 0.0,
+            "tax_paid": 0.0,
+            "deductions_80c": 0.0,
+            "pan": "ERROR"
+        }
