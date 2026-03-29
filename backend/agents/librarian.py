@@ -51,9 +51,15 @@ def get_tax_data(file_path: str) -> dict:
             response_format={"type": "json_object"}
         )
 
-        raw = json.loads(chat_completion.choices[0].message.content)
+        # ✅ SAFE JSON PARSE (prevents crash)
+        content = chat_completion.choices[0].message.content
+        try:
+            raw = json.loads(content)
+        except:
+            print("⚠️ JSON parse failed:", content)
+            return {"salary": 0.0, "tax_paid": 0.0, "deductions_80c": 0.0, "pan": "PARSE_ERROR"}
 
-        # 🔥 NORMALIZATION (CRITICAL FIX)
+        # 🔥 NORMALIZATION (FIXED)
         salary = (
             raw.get("salary")
             or raw.get("Gross Salary")
@@ -70,15 +76,15 @@ def get_tax_data(file_path: str) -> dict:
             or 0.0
         )
 
-            deductions_80c = (
-        raw.get("deductions_80c")
-        or raw.get("Section 80C")
-        or raw.get("80C")
-        or raw.get("Total deduction under section 80C")
-        or raw.get("Total deduction under section 80C, 80CCC and 80CCD(1)")
-        or raw.get("Deduction in respect of life insurance premia")
-        or 0.0
-    )
+        deductions_80c = (
+            raw.get("deductions_80c")
+            or raw.get("Section 80C")
+            or raw.get("80C")
+            or raw.get("Total deduction under section 80C")
+            or raw.get("Total deduction under section 80C, 80CCC and 80CCD(1)")
+            or raw.get("Deduction in respect of life insurance premia")
+            or 0.0
+        )
 
         pan = raw.get("pan") or raw.get("PAN") or "UNKNOWN"
 
