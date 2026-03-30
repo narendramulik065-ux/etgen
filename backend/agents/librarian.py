@@ -45,9 +45,6 @@ def get_tax_data(file_path: str) -> dict:
                         "2. Find Net tax payable OR Total tax deducted\n"
                         "3. Find Section 80C deduction (final deductible amount)\n"
                         "4. Extract PAN\n"
-                        "IMPORTANT:\n"
-                        "- Different formats exist, search entire document\n"
-                        "- Do NOT miss values if present\n"
                         "Return JSON"
                     )
                 },
@@ -61,7 +58,6 @@ def get_tax_data(file_path: str) -> dict:
             response_format={"type": "json_object"}
         )
 
-        # SAFE JSON PARSE
         content = chat_completion.choices[0].message.content
 
         try:
@@ -77,7 +73,6 @@ def get_tax_data(file_path: str) -> dict:
 
         print("🔍 RAW STRUCTURE:", raw)
 
-        # ✅ FIXED SALARY EXTRACTION
         salary = (
             raw.get("salary")
             or raw.get("Gross Salary")
@@ -87,7 +82,6 @@ def get_tax_data(file_path: str) -> dict:
             or 0.0
         )
 
-        # ✅ FIXED TAX EXTRACTION
         tax_paid = (
             raw.get("tax_paid")
             or raw.get("Net tax payable")
@@ -97,10 +91,10 @@ def get_tax_data(file_path: str) -> dict:
             or 0.0
         )
 
-        # ✅ FIXED 80C EXTRACTION
         deductions_80c = (
             raw.get("deductions_80c")
             or raw.get("Section 80C")
+            or raw.get("Section 80C deduction")   # ✅ FIX
             or raw.get("Section_80C_Deduction")
             or raw.get("80C")
             or raw.get("Total deduction under section 80C")
