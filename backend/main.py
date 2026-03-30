@@ -23,7 +23,6 @@ async def optimize(files: UploadFile = File(...)):
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(files.file, buffer)
         
-    # 1. Get Synchronized Data
     data = get_tax_data(temp_path)
     salary = float(data.get("salary", 0))
     tax = float(data.get("tax_paid", 0))
@@ -40,9 +39,7 @@ async def optimize(files: UploadFile = File(...)):
             }
         }
 
-    # 2. Institutional Calculations
-
-    # --- FIX 1: REAL TAX OPTIMIZATION ---
+    # --- TAX OPTIMIZATION ---
     unused_80c = max(150000 - deductions, 0)
 
     if salary <= 500000:
@@ -54,29 +51,31 @@ async def optimize(files: UploadFile = File(...)):
 
     potential_savings = int(unused_80c * tax_rate * 1.04)
 
-    # --- FIX 2: REGIME-AWARE HEALTH SCORE ---
-    is_new_regime = deductions == 0 and salary > 0
-
-    if is_new_regime:
-        if potential_savings == 0:
-            h_score = 10.0
-        else:
-            h_score = 7.5
+    # --- HEALTH SCORE FIX ---
+    if deductions >= 150000:
+        h_score = 10.0
+    elif deductions == 0:
+        h_score = 7.5
     else:
-        h_score = round((min(deductions, 150000) / 150000) * 10, 1)
+        h_score = round((deductions / 150000) * 10, 1)
 
-    # --- FIX 3: ALIGNMENT LOGIC ---
+    # --- ALIGNMENT ---
     leakage_ratio = tax / salary if salary > 0 else 0
     dynamic_alignment = int(100 - (min(leakage_ratio * 200, 40)))
 
-    # --- FIX 4: CORRECT WEALTH PROJECTION ---
-    chart_data = [int(potential_savings * (1.12 ** y)) for y in [0, 5, 10, 15, 20]]
-
-    ultimate_gain = (
-        f"₹{chart_data[-1] / 10000000:.1f}Cr"
-        if chart_data[-1] > 10000000
-        else f"₹{chart_data[-1] / 100000:.1f}L"
-    )
+    # --- WEALTH ---
+    if potential_savings == 0:
+        chart_data = [0, 0, 0, 0, 0]
+        ultimate_gain = "₹0"
+        primary_action = "All deductions optimized. No immediate tax leakage detected."
+    else:
+        chart_data = [int(potential_savings * (1.12 ** y)) for y in [0, 5, 10, 15, 20]]
+        ultimate_gain = (
+            f"₹{chart_data[-1] / 10000000:.1f}Cr"
+            if chart_data[-1] > 10000000
+            else f"₹{chart_data[-1] / 100000:.1f}L"
+        )
+        primary_action = f"Redirect ₹{potential_savings:,} unused deduction into {ultimate_gain} lifetime wealth."
 
     return {
         "household_summary": {
@@ -89,7 +88,7 @@ async def optimize(files: UploadFile = File(...)):
             "potential_savings": f"₹{potential_savings:,}",
             "ultimate_gain": ultimate_gain,
             "chart_data": chart_data,
-            "primary_action": f"Redirect ₹{potential_savings:,} unused deduction into {ultimate_gain} lifetime wealth."
+            "primary_action": primary_action
         },
         "raw_context": data
     }
