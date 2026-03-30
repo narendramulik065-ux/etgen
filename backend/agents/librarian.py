@@ -263,8 +263,6 @@ Return exactly these 24 keys. Numbers as floats, strings as strings."""
     # ------------------------------------------------------------------
 
     # Detect if LLM accidentally returned gross salary as taxable_salary.
-    # If taxable_salary is more than 3x the gross_total_income (which should be smaller),
-    # the LLM gave us the wrong field.
     if gross_total_income > 0 and taxable_salary > gross_total_income * 3:
         print(
             f"WARNING: taxable_salary ({taxable_salary:,.0f}) far exceeds "
