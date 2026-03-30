@@ -19,19 +19,15 @@ app.add_middleware(
 
 
 # ===========================================================================
-# INDIAN INCOME TAX HELPERS
+# INDIAN INCOME TAX HELPERS  (Old Regime, AY 2023-24)
 # ===========================================================================
-
-# ---------------------------------------------------------------------------
-# Old Regime slabs — AY 2023-24
-# ---------------------------------------------------------------------------
-# Income slab        Tax rate
-# 0       – 2,50,000 :  0%
-# 2,50,001 – 5,00,000 :  5%
-# 5,00,001 – 10,00,000 : 20%
-# 10,00,001+            : 30%
-# + 4% Health & Education Cess on computed tax
-# Rebate u/s 87A: full rebate if taxable income <= 5,00,000
+#
+# Slabs:
+#   0       – 2,50,000 :  0%
+#   2,50,001 – 5,00,000 :  5%   (but 87A rebate wipes tax if income <= 5L)
+#   5,00,001 – 10,00,000 : 20%
+#   10,00,001+            : 30%
+#   + 4% Health & Education Cess on all computed tax
 # ---------------------------------------------------------------------------
 
 def compute_old_regime_tax(taxable_income: float) -> float:
@@ -49,26 +45,71 @@ def compute_old_regime_tax(taxable_income: float) -> float:
     if taxable_income <= 500000:
         tax = 0.0
 
-    # 4% Health & Education Cess
     return round(tax * 1.04, 2)
 
 
 def get_marginal_rate(taxable_income: float) -> float:
     """
-    Return the effective marginal rate (slab rate × 1.04 cess) for the given
-    taxable income. Used to value each rupee of additional deduction.
+    Return the effective marginal rate (slab rate x 1.04 cess).
+    Returns 0 for income <= 5L because 87A rebate wipes all tax there.
     """
-    if taxable_income <= 250000:
-        return 0.0
-    elif taxable_income <= 500000:
-        # 87A rebate means tax = 0 for income <= 5L; however if we're computing
-        # the marginal value of a deduction that would push income BELOW 5L,
-        # we should use 5.2%. For income already <= 5L, savings = 0 due to rebate.
-        return 0.0          # rebate wipes all tax; extra deduction saves nothing
+    if taxable_income <= 500000:
+        return 0.0           # 87A rebate — no tax savings from more deductions
     elif taxable_income <= 1000000:
-        return 0.20 * 1.04  # 20.8%
+        return 0.20 * 1.04   # 20.8%
     else:
-        return 0.30 * 1.04  # 31.2%
+        return 0.30 * 1.04   # 31.2%
+
+
+def compute_potential_savings(
+    total_taxable_income: float,
+    unused_80c: float,
+    unused_80d: float,
+    unused_80ccd1b: float,
+) -> tuple[int, int, int, int]:
+    """
+    Compute actual tax savings from unused deductions, correctly handling
+    the Section 87A cliff at ₹5,00,000.
+
+    Returns (total_savings, savings_80c, savings_80d, savings_80ccd1b).
+
+    Logic:
+      - If income is already <= 5L, all savings = 0 (87A wipes tax).
+      - If income is above 5L, deductions reduce tax at marginal rate,
+        BUT only down to 5L. Below 5L the saving is zero (rebate kicks in).
+      - So effective savings = tax(current) - tax(current - unused_deductions),
+        computed properly using compute_old_regime_tax().
+    """
+    if total_taxable_income <= 500000:
+        return 0, 0, 0, 0
+
+    def _saving_for(unused: float) -> int:
+        """Tax saved by one deduction block, respecting the 87A floor."""
+        if unused <= 0:
+            return 0
+        income_after = max(total_taxable_income - unused, 0.0)
+        return max(int(compute_old_regime_tax(total_taxable_income) -
+                       compute_old_regime_tax(income_after)), 0)
+
+    # We must apply deductions in order to track the running income correctly.
+    # Compute marginal saving for each block sequentially.
+    income_remaining = total_taxable_income
+
+    def _marginal_saving(unused: float, current_income: float) -> tuple[int, float]:
+        """Returns (saving_rupees, income_after_deduction)."""
+        if unused <= 0 or current_income <= 500000:
+            return 0, current_income
+        income_after = max(current_income - unused, 0.0)
+        saving = max(int(compute_old_regime_tax(current_income) -
+                         compute_old_regime_tax(income_after)), 0)
+        return saving, income_after
+
+    s_80ccd1b, income_remaining = _marginal_saving(unused_80ccd1b, income_remaining)
+    s_80c,     income_remaining = _marginal_saving(unused_80c,     income_remaining)
+    s_80d,     income_remaining = _marginal_saving(unused_80d,     income_remaining)
+
+    total = s_80ccd1b + s_80c + s_80d
+    return total, s_80c, s_80d, s_80ccd1b
 
 
 def slab_label(taxable_income: float) -> str:
@@ -76,7 +117,7 @@ def slab_label(taxable_income: float) -> str:
     if taxable_income <= 250000:
         return "Nil slab (0%)"
     elif taxable_income <= 500000:
-        return "5% slab (87A rebate applies)"
+        return "5% slab (87A rebate applies — effective tax 0%)"
     elif taxable_income <= 1000000:
         return "20% slab"
     else:
@@ -90,7 +131,7 @@ def slab_label(taxable_income: float) -> str:
 def get_80d_limit(is_senior_citizen: bool = False) -> int:
     """
     80D health insurance deduction limit.
-    Self + family: ₹25,000 (₹50,000 if self is senior citizen >= 60 yrs)
+    Self + family: Rs.25,000 (Rs.50,000 if self is senior citizen >= 60 yrs).
     """
     return 50000 if is_senior_citizen else 25000
 
@@ -105,15 +146,15 @@ def compute_health_score(
     deductions_80ccd1b: float,
     total_taxable_income: float,
     tax_paid: float,
-    gross_salary: float,
+    taxable_salary: float,         # FIX: use taxable_salary not gross_salary
     limit_80d: int = 25000,
 ) -> tuple[float, dict]:
     """
     Score out of 10 across four dimensions:
-      Dimension 1 — 80C utilisation     : 0-4 pts  (max ₹1.5L)
-      Dimension 2 — 80D utilisation     : 0-2 pts  (max ₹25K / ₹50K senior)
-      Dimension 3 — NPS 80CCD(1B)       : 0-2 pts  (max ₹50K)
-      Dimension 4 — Effective tax rate  : 0-2 pts
+      Dim 1 — 80C utilisation     : 0-4 pts  (max Rs.1.5L)
+      Dim 2 — 80D utilisation     : 0-2 pts  (max Rs.25K / Rs.50K senior)
+      Dim 3 — NPS 80CCD(1B)       : 0-2 pts  (max Rs.50K)
+      Dim 4 — Effective tax rate  : 0-2 pts  (vs taxable_salary)
     Returns (score, breakdown_dict).
     """
     breakdown = {}
@@ -121,20 +162,21 @@ def compute_health_score(
     # Dim 1 — 80C
     d1 = round(min(deductions_80c / 150000, 1.0) * 4.0, 2)
     breakdown["80c_pts"]  = d1
-    breakdown["80c_util"] = f"{min(deductions_80c/150000*100, 100):.0f}%"
+    breakdown["80c_util"] = f"{min(deductions_80c / 150000 * 100, 100):.0f}%"
 
     # Dim 2 — 80D
     d2 = round(min(deductions_80d / limit_80d, 1.0) * 2.0, 2)
     breakdown["80d_pts"]  = d2
-    breakdown["80d_util"] = f"{min(deductions_80d/limit_80d*100, 100):.0f}%"
+    breakdown["80d_util"] = f"{min(deductions_80d / limit_80d * 100, 100):.0f}%"
 
-    # Dim 3 — 80CCD(1B)
+    # Dim 3 — 80CCD(1B) / NPS
     d3 = round(min(deductions_80ccd1b / 50000, 1.0) * 2.0, 2)
     breakdown["nps_pts"]  = d3
-    breakdown["nps_util"] = f"{min(deductions_80ccd1b/50000*100, 100):.0f}%"
+    breakdown["nps_util"] = f"{min(deductions_80ccd1b / 50000 * 100, 100):.0f}%"
 
-    # Dim 4 — Effective tax rate vs gross salary
-    base = gross_salary if gross_salary > 0 else total_taxable_income
+    # Dim 4 — Effective tax rate vs taxable_salary (not gross)
+    # FIX: was using gross_salary which inflates the base for high-CTC employees
+    base = taxable_salary if taxable_salary > 0 else total_taxable_income
     if base > 0:
         eff_rate = tax_paid / base
         if eff_rate <= 0.03:
@@ -147,27 +189,29 @@ def compute_health_score(
             d4 = 0.0
     else:
         d4 = 0.0
-    breakdown["tax_eff_pts"] = d4
-    breakdown["eff_tax_rate"] = f"{(tax_paid/base*100):.2f}%" if base > 0 else "N/A"
+    breakdown["tax_eff_pts"]  = d4
+    breakdown["eff_tax_rate"] = f"{(tax_paid / base * 100):.2f}%" if base > 0 else "N/A"
 
     score = round(min(d1 + d2 + d3 + d4, 10.0), 1)
     return score, breakdown
 
 
 # ---------------------------------------------------------------------------
-# Household alignment score (50–100)
+# Household alignment score (50-100)
 # ---------------------------------------------------------------------------
 
-def compute_alignment(tax_paid: float, gross_salary: float) -> int:
+def compute_alignment(tax_paid: float, taxable_salary: float) -> int:
     """
     Measures financial tax efficiency.
-    Low effective tax = high alignment. Penalty capped at 50 pts.
+    FIX: now uses taxable_salary (line 6) instead of gross_salary (line 1d).
+    This prevents artificially high scores on forms where gross is inflated
+    by Section 10 exemptions.
+
     Range: 50 (very high tax leakage) to 100 (near-zero tax).
     """
-    if gross_salary <= 0:
+    if taxable_salary <= 0:
         return 50
-    leakage_ratio = tax_paid / gross_salary
-    # Scale: 0% eff tax -> 100%, 25%+ eff tax -> 50%
+    leakage_ratio = tax_paid / taxable_salary
     return int(max(50, 100 - min(leakage_ratio * 200, 50)))
 
 
@@ -181,11 +225,11 @@ def compute_wealth_trajectory(
     years: int = 20,
 ) -> tuple[list, float, str]:
     """
-    FV of annuity = PMT × [(1+r)^n − 1] / r
+    FV of annuity = PMT x [(1+r)^n - 1] / r
     Returns (chart_data at [0,5,10,15,20 yrs], final_fv, display_string).
     """
     if annual_saving <= 0:
-        return [0, 0, 0, 0, 0], 0.0, "₹0"
+        return [0, 0, 0, 0, 0], 0.0, "Rs.0"
 
     def annuity_fv(pmt, r, n):
         if n == 0:
@@ -197,9 +241,9 @@ def compute_wealth_trajectory(
     final_fv   = annuity_fv(annual_saving, cagr, years)
 
     if final_fv >= 10_000_000:
-        display = f"₹{final_fv / 10_000_000:.1f}Cr"
+        display = f"Rs.{final_fv / 10_000_000:.1f}Cr"
     else:
-        display = f"₹{final_fv / 100_000:.1f}L"
+        display = f"Rs.{final_fv / 100_000:.1f}L"
 
     return chart_data, final_fv, display
 
@@ -211,14 +255,17 @@ def compute_wealth_trajectory(
 @app.post("/api/optimize")
 async def optimize(
     files: UploadFile = File(...),
-    is_senior_citizen: bool = Query(default=False, description="True if employee is >= 60 years old"),
+    is_senior_citizen: bool = Query(
+        default=False,
+        description="True if employee is >= 60 years old (changes 80D limit to Rs.50,000)"
+    ),
 ):
     """
     Upload a Form 16 PDF and receive full tax optimization analysis.
-    Query param: is_senior_citizen=true for 60+ employees (changes 80D limit).
+    Query param: is_senior_citizen=true for 60+ employees.
     """
 
-    # --- 1. Save the uploaded file with a unique name to avoid collisions ---
+    # --- 1. Save uploaded file with a UUID prefix to avoid collisions ---
     os.makedirs("data", exist_ok=True)
     safe_name = f"{uuid.uuid4().hex}_{files.filename}"
     temp_path = os.path.join("data", safe_name)
@@ -238,7 +285,7 @@ async def optimize(
     except Exception:
         pass
 
-    # --- 4. Pull all extracted values (with safe defaults) ---
+    # --- 4. Pull all extracted values ---
     taxable_salary        = float(data.get("taxable_salary", 0))
     gross_salary          = float(data.get("gross_salary", 0))
     tax_paid              = float(data.get("tax_paid", 0))
@@ -256,27 +303,29 @@ async def optimize(
     health_edu_cess       = float(data.get("health_edu_cess", 0))
     tax_on_total_income   = float(data.get("tax_on_total_income", 0))
 
-    # --- 5. Guard: if we couldn't extract salary at all, return a clear error ---
+    # --- 5. Guard: if we couldn't extract salary at all ---
     if taxable_salary <= 0 and gross_salary <= 0:
         return {
-            "error": "Could not extract salary data from the uploaded document. "
-                     "Please ensure you have uploaded a valid Form 16 PDF with Part B.",
+            "error": (
+                "Could not extract salary data from the uploaded document. "
+                "Please ensure you have uploaded a valid Form 16 PDF with Part B."
+            ),
             "household_summary": _zero_summary(),
             "tax_optimization":  _zero_optimization(),
             "tax_summary":       {},
             "raw_context":       data,
         }
 
-    # --- 6. Derive total_taxable_income if the LLM missed it ---
+    # --- 6. Derive total_taxable_income if LLM missed it ---
     if total_taxable_income <= 0:
         total_taxable_income = max(taxable_salary - total_vi_a_deductions, 0.0)
 
-    # Use gross_total_income as taxable_salary fallback
+    # Use gross_total_income as taxable_salary fallback only
     if taxable_salary <= 0 and gross_total_income > 0:
         taxable_salary = gross_total_income
 
     # -----------------------------------------------------------------------
-    # TAX OPTIMIZATION — compute unused deduction opportunities
+    # TAX OPTIMIZATION
     # -----------------------------------------------------------------------
 
     limit_80d = get_80d_limit(is_senior_citizen)
@@ -285,16 +334,19 @@ async def optimize(
     unused_80c     = max(150000 - deductions_80c, 0.0)
     unused_80d     = max(limit_80d - deductions_80d, 0.0)
     unused_80ccd1b = max(50000 - deductions_80ccd1b, 0.0)
-    total_unused   = unused_80c + unused_80d + unused_80ccd1b
 
-    # Marginal rate on TAXABLE income (correct slab)
+    # FIX: use cliff-aware savings computation instead of simple rate × unused
+    potential_savings, savings_from_80c, savings_from_80d, savings_from_80ccd1b = (
+        compute_potential_savings(
+            total_taxable_income=total_taxable_income,
+            unused_80c=unused_80c,
+            unused_80d=unused_80d,
+            unused_80ccd1b=unused_80ccd1b,
+        )
+    )
+
+    # Marginal rate label (for display only)
     marginal_rate = get_marginal_rate(total_taxable_income)
-
-    # Potential savings = unused × marginal rate
-    potential_savings     = int(total_unused * marginal_rate)
-    savings_from_80c      = int(unused_80c * marginal_rate)
-    savings_from_80d      = int(unused_80d * marginal_rate)
-    savings_from_80ccd1b  = int(unused_80ccd1b * marginal_rate)
 
     # -----------------------------------------------------------------------
     # WEALTH TRAJECTORY (annuity, 20 yr @ 12% CAGR)
@@ -311,20 +363,21 @@ async def optimize(
     if potential_savings > 0:
         action_parts = []
         if savings_from_80ccd1b > 0:
-            action_parts.append(f"₹{savings_from_80ccd1b:,} via NPS 80CCD(1B)")
+            action_parts.append(f"Rs.{savings_from_80ccd1b:,} via NPS 80CCD(1B)")
         if savings_from_80c > 0:
-            action_parts.append(f"₹{savings_from_80c:,} via 80C (ELSS/PPF/LIC)")
+            action_parts.append(f"Rs.{savings_from_80c:,} via 80C (ELSS/PPF/LIC)")
         if savings_from_80d > 0:
-            action_parts.append(f"₹{savings_from_80d:,} via 80D (Health Insurance)")
-        detail = " + ".join(action_parts) if action_parts else f"₹{potential_savings:,}"
+            action_parts.append(f"Rs.{savings_from_80d:,} via 80D (Health Insurance)")
+        detail = " + ".join(action_parts) if action_parts else f"Rs.{potential_savings:,}"
         primary_action = (
             f"Save {detail} in taxes this year "
-            f"→ grows to {ultimate_gain} over {YEARS} years at {int(CAGR*100)}% CAGR."
+            f"— grows to {ultimate_gain} over {YEARS} years at {int(CAGR * 100)}% CAGR."
         )
     else:
         primary_action = (
-            "All key deductions (80C, 80D, NPS) are fully utilised. "
-            "Consider a CA for advanced strategies like HUF, 80EEA home loan, or LTCG harvesting."
+            "Your income is at or below the Rs.5L threshold — Section 87A rebate "
+            "eliminates all tax. Additional deductions won't reduce your tax further. "
+            "Consider a CA for wealth-building strategies like ELSS SIPs or NPS for retirement."
         )
 
     # -----------------------------------------------------------------------
@@ -336,35 +389,37 @@ async def optimize(
         deductions_80ccd1b=deductions_80ccd1b,
         total_taxable_income=total_taxable_income,
         tax_paid=tax_paid,
-        gross_salary=gross_salary if gross_salary > 0 else taxable_salary,
+        taxable_salary=taxable_salary,     # FIX: pass taxable_salary, not gross
         limit_80d=limit_80d,
     )
 
     # -----------------------------------------------------------------------
     # HOUSEHOLD ALIGNMENT
+    # FIX: use taxable_salary as base, not gross_salary
     # -----------------------------------------------------------------------
-    base_for_alignment = gross_salary if gross_salary > 0 else taxable_salary
-    dynamic_alignment  = compute_alignment(tax_paid, base_for_alignment)
+    dynamic_alignment = compute_alignment(tax_paid, taxable_salary)
 
     # -----------------------------------------------------------------------
-    # NET WORTH — 10x gross annual income heuristic (industry standard)
-    # Clearly labeled as an estimate; this is NOT derived from Form 16.
+    # NET WORTH — heuristic: 10x taxable_salary
+    # FIX: was using gross_salary (line 1d) which includes Section 10 exemptions
+    # and wildly overstates take-home pay. taxable_salary (line 6) is the correct
+    # proxy for annual economic income.
     # -----------------------------------------------------------------------
-    nw_base = gross_salary if gross_salary > 0 else taxable_salary
+    nw_base = taxable_salary  # line 6: income chargeable under head Salaries
     net_worth_value   = nw_base * 10
     net_worth_display = (
-        f"₹{net_worth_value / 10_000_000:.1f}Cr"
+        f"Rs.{net_worth_value / 10_000_000:.1f}Cr"
         if net_worth_value >= 10_000_000
-        else f"₹{net_worth_value / 100_000:.1f}L"
+        else f"Rs.{net_worth_value / 100_000:.1f}L"
     )
 
     # -----------------------------------------------------------------------
-    # MONTHLY SAVINGS — 28% savings rate assumption on taxable salary
+    # MONTHLY SAVINGS — 28% savings rate on taxable salary
     # -----------------------------------------------------------------------
     monthly_savings_amount = int((taxable_salary / 12) * 0.28)
 
     # -----------------------------------------------------------------------
-    # COMPUTE WHAT TAX SHOULD HAVE BEEN (cross-check)
+    # CROSS-CHECK: computed tax vs Form 16 tax
     # -----------------------------------------------------------------------
     computed_tax = compute_old_regime_tax(total_taxable_income)
     tax_diff     = round(abs(computed_tax - tax_paid), 2)
@@ -375,31 +430,35 @@ async def optimize(
     return {
         "household_summary": {
             "total_net_worth":        net_worth_display,
-            "net_worth_basis":        "estimated — 10x gross annual income (heuristic)",
-            "monthly_savings":        f"₹{monthly_savings_amount:,}",
+            "net_worth_basis":        "estimated — 10x taxable salary (line 6, income chargeable under head Salaries)",
+            "monthly_savings":        f"Rs.{monthly_savings_amount:,}",
             "monthly_savings_basis":  "estimated — assumed 28% savings rate on taxable salary",
             "health_score":           f"{h_score}/10",
             "health_score_breakdown": score_breakdown,
             "household_alignment":    dynamic_alignment,
-            "alignment_basis":        "based on effective tax rate vs gross income",
+            "alignment_basis":        "based on effective tax rate vs taxable salary (line 6)",
         },
 
         "tax_optimization": {
-            "potential_savings":      f"₹{potential_savings:,}",
+            "potential_savings":      f"Rs.{potential_savings:,}",
             "marginal_tax_rate":      f"{marginal_rate * 100:.1f}%",
             "slab":                   slab_label(total_taxable_income),
             "savings_breakdown": {
-                "from_80c":           f"₹{savings_from_80c:,}",
-                "from_80d":           f"₹{savings_from_80d:,}",
-                "from_80ccd1b":       f"₹{savings_from_80ccd1b:,}",
-                "unused_80c":         f"₹{unused_80c:,.0f}",
-                "unused_80d":         f"₹{unused_80d:,.0f}",
-                "unused_80ccd1b":     f"₹{unused_80ccd1b:,.0f}",
-                "80d_limit_used":     f"₹{limit_80d:,} ({'senior citizen' if is_senior_citizen else 'standard'})",
+                "from_80c":           f"Rs.{savings_from_80c:,}",
+                "from_80d":           f"Rs.{savings_from_80d:,}",
+                "from_80ccd1b":       f"Rs.{savings_from_80ccd1b:,}",
+                "unused_80c":         f"Rs.{unused_80c:,.0f}",
+                "unused_80d":         f"Rs.{unused_80d:,.0f}",
+                "unused_80ccd1b":     f"Rs.{unused_80ccd1b:,.0f}",
+                "80d_limit_used":     f"Rs.{limit_80d:,} ({'senior citizen' if is_senior_citizen else 'standard'})",
+                "savings_note": (
+                    "Savings correctly account for Section 87A rebate cliff at Rs.5,00,000. "
+                    "Deductions that push taxable income below Rs.5L yield zero additional savings."
+                ),
             },
             "ultimate_gain":          ultimate_gain,
             "ultimate_gain_basis":    (
-                f"Annual ₹{potential_savings:,} reinvested at {int(CAGR*100)}% CAGR "
+                f"Annual Rs.{potential_savings:,} reinvested at {int(CAGR * 100)}% CAGR "
                 f"for {YEARS} years — annuity future value formula"
             ),
             "chart_data":             chart_data,
@@ -408,7 +467,7 @@ async def optimize(
         },
 
         "tax_summary": {
-            # Form 16 extracted values
+            # Identity
             "employee_name":          data.get("employee_name", ""),
             "employer_name":          data.get("employer_name", ""),
             "pan":                    data.get("pan", ""),
@@ -417,31 +476,35 @@ async def optimize(
             "period_to":              data.get("period_to", ""),
 
             # Income
-            "gross_salary":           f"₹{gross_salary:,.0f}",
-            "taxable_salary":         f"₹{taxable_salary:,.0f}",
-            "gross_total_income":     f"₹{gross_total_income:,.0f}",
-            "total_taxable_income":   f"₹{total_taxable_income:,.0f}",
-            "standard_deduction":     f"₹{standard_deduction:,.0f}",
+            "gross_salary":           f"Rs.{gross_salary:,.0f}",
+            "gross_salary_note":      "Line 1(d) — total before Section 10 exemptions",
+            "section_10_exemptions":  f"Rs.{float(data.get('section_10_exemptions', 0)):,.0f}",
+            "taxable_salary":         f"Rs.{taxable_salary:,.0f}",
+            "taxable_salary_note":    "Line 6 — income chargeable under head Salaries",
+            "gross_total_income":     f"Rs.{gross_total_income:,.0f}",
+            "total_taxable_income":   f"Rs.{total_taxable_income:,.0f}",
+            "standard_deduction":     f"Rs.{standard_deduction:,.0f}",
 
             # Tax
-            "tax_paid":               f"₹{tax_paid:,.0f}",
-            "computed_tax":           f"₹{computed_tax:,.2f}",
-            "tax_variance":           f"₹{tax_diff:,.2f}",
-            "rebate_87a":             f"₹{rebate_87a:,.0f}",
-            "health_edu_cess":        f"₹{health_edu_cess:,.0f}",
+            "tax_paid":               f"Rs.{tax_paid:,.0f}",
+            "computed_tax":           f"Rs.{computed_tax:,.2f}",
+            "tax_variance":           f"Rs.{tax_diff:,.2f}",
+            "rebate_87a":             f"Rs.{rebate_87a:,.0f}",
+            "health_edu_cess":        f"Rs.{health_edu_cess:,.0f}",
             "effective_tax_rate":     (
-                f"{(tax_paid / gross_salary * 100):.2f}%"
-                if gross_salary > 0 else "N/A"
+                f"{(tax_paid / taxable_salary * 100):.2f}%"
+                if taxable_salary > 0 else "N/A"
             ),
+            "effective_tax_rate_note": "tax paid / taxable salary (line 6)",
 
             # Deductions
-            "total_vi_a_deductions":  f"₹{total_vi_a_deductions:,.0f}",
-            "deductions_80c":         f"₹{deductions_80c:,.0f}",
-            "deductions_80ccd1b":     f"₹{deductions_80ccd1b:,.0f}",
-            "deductions_80d":         f"₹{deductions_80d:,.0f}",
-            "deductions_80e":         f"₹{deductions_80e:,.0f}",
-            "deductions_80g":         f"₹{deductions_80g:,.0f}",
-            "deductions_80tta":       f"₹{deductions_80tta:,.0f}",
+            "total_vi_a_deductions":  f"Rs.{total_vi_a_deductions:,.0f}",
+            "deductions_80c":         f"Rs.{deductions_80c:,.0f}",
+            "deductions_80ccd1b":     f"Rs.{deductions_80ccd1b:,.0f}",
+            "deductions_80d":         f"Rs.{deductions_80d:,.0f}",
+            "deductions_80e":         f"Rs.{deductions_80e:,.0f}",
+            "deductions_80g":         f"Rs.{deductions_80g:,.0f}",
+            "deductions_80tta":       f"Rs.{deductions_80tta:,.0f}",
         },
 
         "raw_context": data,
@@ -451,7 +514,7 @@ async def optimize(
 @app.post("/api/chat")
 async def chat(request: Request):
     """Mentor AI chat — send a user message with the tax context."""
-    body = await request.json()
+    body    = await request.json()
     message = body.get("message", "")
     context = body.get("context", {})
     if not message:
@@ -483,24 +546,24 @@ async def health_check():
 
 def _zero_summary() -> dict:
     return {
-        "total_net_worth":       "₹0",
-        "net_worth_basis":       "insufficient data",
-        "monthly_savings":       "₹0",
-        "monthly_savings_basis": "insufficient data",
-        "health_score":          "0/10",
+        "total_net_worth":        "Rs.0",
+        "net_worth_basis":        "insufficient data",
+        "monthly_savings":        "Rs.0",
+        "monthly_savings_basis":  "insufficient data",
+        "health_score":           "0/10",
         "health_score_breakdown": {},
-        "household_alignment":   0,
-        "alignment_basis":       "insufficient data",
+        "household_alignment":    0,
+        "alignment_basis":        "insufficient data",
     }
 
 
 def _zero_optimization() -> dict:
     return {
-        "potential_savings":   "₹0",
+        "potential_savings":   "Rs.0",
         "marginal_tax_rate":   "0%",
         "slab":                "unknown",
         "savings_breakdown":   {},
-        "ultimate_gain":       "₹0",
+        "ultimate_gain":       "Rs.0",
         "ultimate_gain_basis": "",
         "chart_data":          [0, 0, 0, 0, 0],
         "chart_years":         [0, 5, 10, 15, 20],
